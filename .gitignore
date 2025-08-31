@@ -1,0 +1,6 @@
+# Data output and figures folders
+out/
+figs/
+
+# MacOS metadata
+.DS_Store
