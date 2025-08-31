@@ -9,6 +9,7 @@ import pandas as pd
 import networkx as nx
 import random 
 import json
+import os
 
 from multiprocessing import Pool
 
@@ -93,17 +94,18 @@ def collect_paths(G, source, target, num_paths=1000, max_steps=100):
 
     return paths
 
-def run_paths_for_targets(source) :
+def run_paths_for_targets(source, G) :
     source_paths = {}
-    for target in largest_cc_subgraph.nodes():
+    for target in G.nodes():
         if target != source:
             # Calculate paths for pair
-            pair_paths = collect_paths(largest_cc_subgraph, source, target, num_paths=200, max_steps=10**4)
+            pair_paths = collect_paths(G, source, target, num_paths=300, max_steps=10**4)
 
             source_paths[target] = pair_paths
     
     with open("output/" + str(source) + ".json", 'w') as f:
         json.dump(source_paths, f)
+        print(source)
     
     return source_paths
 
@@ -114,12 +116,7 @@ G_s = create_network(df)
 idx_to_name = {i : n for i, n in enumerate(G_s.nodes())}
 name_to_idx = {n : i for i, n in enumerate(G_s.nodes())}
 
-# with open("idx_to_name.json", 'w') as f:
-#     json.dump(idx_to_name, f)
-# with open("name_to_idx.json", 'w') as f:
-#     json.dump(name_to_idx, f)
-
-G = nx.relabel_nodes(G_s, name_to_idx)
+G = nx.relabel_nodes(G_s, name_to_idx) 
 
 #network analysis
 disconnected_edges = []
@@ -128,7 +125,7 @@ for component in nx.weakly_connected_components(G):  # for directed graph G
     if subgraph.number_of_nodes() == 2 and subgraph.number_of_edges() == 1:
         disconnected_edges.extend(subgraph.edges())
 
-print(len(disconnected_edges)) #252
+#len(disconnected_edges) #252
 
 largest_cc_nodes = max(nx.weakly_connected_components(G),key=len) #4765 nodes
 largest_cc_subgraph = G.subgraph(largest_cc_nodes).copy()
@@ -136,14 +133,18 @@ largest_cc_subgraph = G.subgraph(largest_cc_nodes).copy()
 zero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_cc_subgraph.out_degree(node) == 0]
 #1584
 
+
 nonzero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_cc_subgraph.out_degree(node) > 0]
 
+source_nodes = [n for n in nonzero_out_degree_nodes if not os.path.exists(f"output/{n}.json")]
+print(source_nodes)
 
 # Remove self-loops from the largest connected component subgraph
 largest_cc_subgraph.remove_edges_from(nx.selfloop_edges(largest_cc_subgraph))
 
 if __name__ == "__main__":
     # Calculate paths, saving intermittently
-    n_workers = 4
+    args = [(n, largest_cc_subgraph) for n in source_nodes]
+    n_workers = 60
     with Pool(processes=n_workers) as pool:
-        results = pool.map(run_paths_for_targets, nonzero_out_degree_nodes[:50])
+        results = pool.starmap(run_paths_for_targets, args)
