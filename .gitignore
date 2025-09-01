@@ -4,3 +4,6 @@ figs/
 
 # MacOS metadata
 .DS_Store
+
+# Pycache
+sim/__pycache__/
