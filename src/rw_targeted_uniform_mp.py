@@ -16,36 +16,6 @@ from multiprocessing import Pool
 # Import our own helper functions
 from network_utils import get_network_from_file
 
-def create_network(df):
-   """
-   Converts a DataFrame with source nodes, target nodes and edge weights
-   into a directed NetworkX graph.
-
-   Parameters:
-   ----------
-   df : pandas.DataFrame
-       A DataFrame with the following columns:
-       - 'source': Source node (str or int)
-       - 'target': Target node (str or int)
-       - 'weight': Weight of the directed edge (int or float)
-
-   Returns:
-   -------
-   G : networkx.DiGraph
-       A directed graph where each edge from 'source' to 'target' has an associated weight.
-   """
-   
-   G = nx.DiGraph() # Initialize a directed graph
-
-   # Iterate through each row to add edges with weights
-   for _, row in df.iterrows():
-       source = row['source']
-       target = row['target']
-       weight = row['weight']
-       G.add_edge(source, target, weight=weight)
-
-   return G
-
 def collect_paths(G, source, target, num_paths=1000, max_steps=100):
     """
     Perform random walks on a directed weighted graph from source to target.
