@@ -22,11 +22,11 @@ df_names = pd.read_csv(file_path)
 # Extract unqiue settlement names and assign IDs
 settlement_names = pd.unique(df_names[['source', 'target']].values.ravel())
 settlement_names = sorted(settlement_names)  # Sorting maintains consistency within same dataset
-name_to_idx = {n : i for i, n in enumerate(settlement_names)}
-idx_to_name = {i : n for i, n in enumerate(settlement_names)}
+name_to_id = {n : i for i, n in enumerate(settlement_names)}
+id_to_name = {i : n for i, n in enumerate(settlement_names)}
 
 # Save mappings betweeen names and IDs to disk (same location as dataaset)
-with open(file_path.split('.')[0] + "_idx_to_name.json", 'w') as f:
-    json.dump(idx_to_name, f)
-with open(file_path.split('.')[0] + "_name_to_idx.json", 'w') as f:
-    json.dump(name_to_idx, f)
+with open(file_path.split('.')[0] + "_id_to_name.json", 'w') as f:
+    json.dump(id_to_name, f)
+with open(file_path.split('.')[0] + "_name_to_id.json", 'w') as f:
+    json.dump(name_to_id, f)

@@ -13,6 +13,9 @@ import os
 
 from multiprocessing import Pool
 
+# Import our own helper functions
+from network_utils import get_network_from_file
+
 def create_network(df):
    """
    Converts a DataFrame with source nodes, target nodes and edge weights
@@ -76,15 +79,16 @@ def collect_paths(G, source, target, num_paths=1000, max_steps=100):
             neighbors = list(G.successors(current))
             if not neighbors:
                 break  # dead end
-            probabilities = [G[current][nbr].get('weight', 1.0) for nbr in neighbors]
+            # probabilities = [G[current][nbr].get('weight', 1.0) for nbr in neighbors]
             #print(probabilities)
-            current = random.choices(neighbors, weights=probabilities, k=1)[0]
+            current = random.choices(neighbors, k=1)[0]
             path.append(current)
             #print(path)
             steps += 1
             
             # If we reach a stop/sink node (zero out degree),
-            # stop current path realization
+            # stop current path realization — actually think we don't need this with the break
+            # statement above, but no time for testing now
             if G.out_degree(current) == 0:
                 continue
 
@@ -108,14 +112,9 @@ def run_paths_for_targets(source, G) :
     
     return source_paths
 
-file_path = './Weighted_network_data_3.csv'
-df = pd.read_csv(file_path)
-G_s = create_network(df)
-
-idx_to_name = {i : n for i, n in enumerate(G_s.nodes())}
-name_to_idx = {n : i for i, n in enumerate(G_s.nodes())}
-
-G = nx.relabel_nodes(G_s, name_to_idx) 
+# Generate network from data
+file_path = 'data/Weighted_network_data_3.csv'
+G = get_network_from_file(file_path, relabel_names=True)
 
 #network analysis
 disconnected_edges = []

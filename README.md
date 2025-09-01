@@ -8,7 +8,7 @@ Follow-up from Comlpexity72h preprint:
 ## Repo structure
 
 Overview of files and folders:
-- All simulation scripts are under `sim/`.
+- All data manipulation and simulation scripts are under `src/`.
 - All data used by scripts is under `data/`.
 
 Notebooks and scripts for data analysis and visualization are under the main directory, e.g.:
