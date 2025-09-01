@@ -75,7 +75,7 @@ def run_paths_for_targets(source, G) :
 
             source_paths[target] = pair_paths
     
-    with open("output/" + str(source) + ".json", 'w') as f:
+    with open("out/sim_output/" + str(source) + ".json", 'w') as f:
         json.dump(source_paths, f)
         print(source)
     
@@ -105,7 +105,7 @@ zero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_c
 
 nonzero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_cc_subgraph.out_degree(node) > 0]
 
-source_nodes = [n for n in nonzero_out_degree_nodes if not os.path.exists(f"output/{n}.json")]
+source_nodes = [n for n in nonzero_out_degree_nodes if not os.path.exists(f"out/sim_output/{n}.json")]
 print(source_nodes)
 
 # Remove self-loops from the largest connected component subgraph

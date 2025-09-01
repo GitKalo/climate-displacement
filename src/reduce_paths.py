@@ -1,9 +1,9 @@
 import json, glob, os
 
-if not os.path.exists('output_reduced'):
-    os.makedirs('output_reduced')
+if not os.path.exists('out/sim_output_reduced'):
+    os.makedirs('out/sim_output_reduced')
 
-for json_file in glob.glob('output/*.json')[:10]:
+for json_file in glob.glob('out/sim_output/*.json')[:10]:
     with open(json_file, 'r') as f:
         data = json.load(f)
 
@@ -23,6 +23,6 @@ for json_file in glob.glob('output/*.json')[:10]:
         # for target, paths in data_new.items():
         #     with open(f"output_reduced/{json_file.split('/')[-1]}", 'w') as f:
         #         json.dump(data_new, f)
-        
-        with open(f"output_reduced/{json_file.split('/')[-1]}", 'w') as f:
+
+        with open(f"out/sim_output_reduced/{json_file.split('/')[-1]}", 'w') as f:
             json.dump(data_new, f)

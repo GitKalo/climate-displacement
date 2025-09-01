@@ -1,9 +1,9 @@
 import json, glob, os
 
-if not os.path.exists('output_counts'):
-    os.makedirs('output_counts')
+if not os.path.exists('out/sim_output_counts'):
+    os.makedirs('out/sim_output_counts')
 
-for json_file in glob.glob('output_reduced/*.json')[:10]:
+for json_file in glob.glob('out/sim_output_reduced/*.json')[:10]:
     with open(json_file, 'r') as f:
         data = json.load(f)
         print(data)
@@ -24,5 +24,5 @@ for json_file in glob.glob('output_reduced/*.json')[:10]:
         print(data_new)
 
         # for target, paths in data_new.items():
-        with open(f"output_counts/{json_file.split('/')[-1]}", 'w') as f:
+        with open(f"out/sim_output_counts/{json_file.split('/')[-1]}", 'w') as f:
             json.dump(data_new, f)
