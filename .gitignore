@@ -6,4 +6,4 @@ figs/
 .DS_Store
 
 # Pycache
-sim/__pycache__/
+src/__pycache__/
