@@ -28,7 +28,16 @@ file_path = 'data/settlements_corrected_1-2.csv'
 df = pd.read_csv(file_path)
 
 # Filter the df to keep only columns relevant for hazard analysis
-df_hazards = df.filter(items=['Settlement Name', 'Total new arrivals since last week', 'Number of Males (18 and above) since last week', 'Number of Females (18 and above) since last week', 'Number of Children under 18 since last week', 'Final destination of the new arrivals', 'Reason of Displacement', 'Somalia Location of Origin (Corrected)'])
+df_hazards = df.filter(items=[
+                    'Settlement Name', 
+                    'Total new arrivals since last week', 
+                    'Number of Males (18 and above) since last week', 
+                    'Number of Females (18 and above) since last week', 
+                    'Number of Children under 18 since last week', 
+                    'Final destination of the new arrivals', 
+                    'Reason of Displacement', 
+                    'Somalia Location of Origin (Corrected)'
+                ])
 
 # Consolidate Other values
 df_hazards['Reason of Displacement'] = \
