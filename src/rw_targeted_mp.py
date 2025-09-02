@@ -5,18 +5,17 @@ Created on Wed Jun 25 10:49:25 2025
 @author: mbozh
 """
 
-import pandas as pd
 import networkx as nx
 import random 
 import json
-import os
+import os, sys
 
 from multiprocessing import Pool
 
 # Import our own helper functions
 from network_utils import get_network_from_file
 
-def collect_paths(G, source, target, num_paths=1000, max_steps=100):
+def collect_paths(G, source, target, num_paths=1000, max_steps=100, uniform_rw=False):
     """
     Perform random walks on a directed weighted graph from source to target.
 
@@ -45,45 +44,45 @@ def collect_paths(G, source, target, num_paths=1000, max_steps=100):
         current = source
         steps = 0
 
-        while current != target and steps < max_steps:
+        # Stop at target, sink, or max steps
+        while current != target \
+              and G.out_degree(current) > 0 \
+              and steps < max_steps :
             neighbors = list(G.successors(current))
-            if not neighbors:
-                break  # dead end
-            probabilities = [G[current][nbr].get('weight', 1.0) for nbr in neighbors]
-            #print(probabilities)
-            current = random.choices(neighbors, weights=probabilities, k=1)[0]
+            if uniform_rw :         # Uniform walk
+                current = random.choices(neighbors, k=1)[0]
+            else :                  # Biased walk
+                probabilities = [G[current][nbr].get('weight', 1.0) for nbr in neighbors]
+                current = random.choices(neighbors, weights=probabilities, k=1)[0]
             path.append(current)
-            #print(path)
             steps += 1
             
-            # If we reach a stop/sink node (zero out degree),
-            # stop current path realization
-            if G.out_degree(current) == 0:
-                continue
-
-        #if path[-1] == target:
         paths.append(path)
 
     return paths
 
-def run_paths_for_targets(source, G) :
+def run_paths_for_targets(source, G, output_dir='out/output', uniform_rw=False) :
+    """
+    Run random walk simulations for all target nodes in G from a given source node.
+    """
     source_paths = {}
     for target in G.nodes():
         if target != source:
             # Calculate paths for pair
-            pair_paths = collect_paths(G, source, target, num_paths=300, max_steps=10**4)
+            pair_paths = collect_paths(G, source, target, num_paths=300, max_steps=10**4, uniform_rw=uniform_rw)
 
             source_paths[target] = pair_paths
-    
-    with open("out/sim_output/" + str(source) + ".json", 'w') as f:
+
+    outfile = f"{output_dir}/{source}.json"
+    with open(outfile, 'w') as f:
         json.dump(source_paths, f)
-        print(source)
-    
+        print(f"Wrote results to {outfile}")
+
     return source_paths
 
 # Generate network from data
-file_path = 'data/Weighted_network_data_3.csv'
-G = get_network_from_file(file_path, relabel_names=True)
+dataset_path = 'data/Weighted_network_data_3.csv'
+G = get_network_from_file(dataset_path, relabel_names=True)
 # TODO: Create script for network generation that saves network as 
 # pickled object on disk, so we avoid generating each time?
 
@@ -94,26 +93,46 @@ for component in nx.weakly_connected_components(G):  # for directed graph G
     if subgraph.number_of_nodes() == 2 and subgraph.number_of_edges() == 1:
         disconnected_edges.extend(subgraph.edges())
 
-#len(disconnected_edges) #252
-
+# Keep only largest connected component of graph
 largest_cc_nodes = max(nx.weakly_connected_components(G),key=len) #4765 nodes
 largest_cc_subgraph = G.subgraph(largest_cc_nodes).copy()
 
-zero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_cc_subgraph.out_degree(node) == 0]
-#1584
-
-
-nonzero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_cc_subgraph.out_degree(node) > 0]
-
-source_nodes = [n for n in nonzero_out_degree_nodes if not os.path.exists(f"out/sim_output/{n}.json")]
-print(source_nodes)
-
-# Remove self-loops from the largest connected component subgraph
+# Remove self-loops
 largest_cc_subgraph.remove_edges_from(nx.selfloop_edges(largest_cc_subgraph))
 
+# Directory to output json files to
+output_dir = 'out/sim_output'
+
+# Create directory if it does not exist yet
+if not os.path.exists(output_dir) : os.makedirs(output_dir)
+
+# Get potential source nodes
+nonzero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_cc_subgraph.out_degree(node) > 0]
+
+# Get list of source nodes (nonzero out degree nodes that we have not processed yet)
+source_nodes = [n for n in nonzero_out_degree_nodes if not os.path.exists(f"{output_dir}/{n}.json")]
+
 if __name__ == "__main__":
+    # Print useful parameters
+    print(f"Using data from '{dataset_path}'.")
+    print(f"Saving results to '{output_dir}'.")
+
+    # Get mode of simulating random walks (biased or uniform)
+    try :
+        mode = sys.argv[1]
+        if mode == 'biased' :
+            uniform_rw = False
+        elif mode == 'uniform' :
+            uniform_rw = True
+        else :
+            raise ValueError(f"Unknown mode: {mode}")
+    except IndexError :
+        # If no mode specified, default to biased
+        uniform_rw = False
+        print("No mode specified, defaulting to biased random walk.")
+
     # Calculate paths, saving intermittently
-    args = [(n, largest_cc_subgraph) for n in source_nodes]
-    n_workers = 60
+    args = [(n, largest_cc_subgraph, output_dir, uniform_rw) for n in source_nodes]
+    n_workers = 4
     with Pool(processes=n_workers) as pool:
         results = pool.starmap(run_paths_for_targets, args)

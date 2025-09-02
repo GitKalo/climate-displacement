@@ -15,6 +15,9 @@ of a 2D matrix, where:
 - rows correspond to settlements (ordered by the keys in the mapping);
 - columns correspond to hazard types (ordered according to the hazards set); and
 - values represent the number of IDPs.
+
+Note that the only settlements considered for the "cleaned" data and IDP counts 
+are those that appear as a final destination at least once.
 """
 
 import json
