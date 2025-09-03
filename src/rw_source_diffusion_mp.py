@@ -149,7 +149,7 @@ if __name__ == "__main__":
         print("No mode specified, defaulting to biased random walk.")
 
     # Calculate paths, saving intermittently
-    args = [(largest_cc_subgraph, n, output_dir, uniform_rw) for n in source_nodes[:100]]
+    args = [(largest_cc_subgraph, n, output_dir, uniform_rw) for n in source_nodes]
     n_workers = 4
     with Pool(processes=n_workers) as pool:
         results = pool.starmap(run_paths_for_targets, args)
