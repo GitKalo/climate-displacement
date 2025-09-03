@@ -86,13 +86,6 @@ G = get_network_from_file(dataset_path, relabel_names=True)
 # TODO: Create script for network generation that saves network as 
 # pickled object on disk, so we avoid generating each time?
 
-#network analysis
-disconnected_edges = []
-for component in nx.weakly_connected_components(G):  # for directed graph G
-    subgraph = G.subgraph(component)
-    if subgraph.number_of_nodes() == 2 and subgraph.number_of_edges() == 1:
-        disconnected_edges.extend(subgraph.edges())
-
 # Keep only largest connected component of graph
 largest_cc_nodes = max(nx.weakly_connected_components(G),key=len) #4765 nodes
 largest_cc_subgraph = G.subgraph(largest_cc_nodes).copy()
