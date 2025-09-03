@@ -61,9 +61,32 @@ def collect_paths(G, source, target, num_paths=1000, max_steps=100, uniform_rw=F
 
     return paths
 
-def run_paths_for_targets(source, G, output_dir='out/output', uniform_rw=False) :
+def run_paths_for_targets(G, source, output_dir='out/output', uniform_rw=False) :
     """
-    Run random walk simulations for all target nodes in G from a given source node.
+    Run random walk simulations for all target nodes in G from a given source 
+    node and save the results as a json file.
+
+    Parameters:
+    ----------
+    G : networkx.DiGraph
+        A directed graph with edge weights used as transition probabilities 
+        (unless `uniform_rw` is True).
+    source : node
+        Starting node for the random walk.
+    output_dir : str
+        Directory to save the output json file with name <source>.json.
+    uniform_rw : bool
+        Whether to use uniform random walk instead of biasing the walk
+        transition probabilities using edge weights in G. Defaults to False,
+        i.e. a biased walk.
+
+    Returns:
+    -------
+    paths : dict of lists
+        A dictionary indexed by target node IDs containing up to `num_paths` 
+        paths (lists of nodes) from the source node to the respective target.
+        Note that these are "attemped" paths to target — not all paths end at 
+        the desired target node, since they can get stuck in "sink" nodes.
     """
     source_paths = {}
     for target in G.nodes():
@@ -94,7 +117,7 @@ largest_cc_subgraph = G.subgraph(largest_cc_nodes).copy()
 largest_cc_subgraph.remove_edges_from(nx.selfloop_edges(largest_cc_subgraph))
 
 # Directory to output json files to
-output_dir = 'out/sim_output'
+output_dir = 'out/sim_output_target'
 
 # Create directory if it does not exist yet
 if not os.path.exists(output_dir) : os.makedirs(output_dir)
@@ -125,7 +148,7 @@ if __name__ == "__main__":
         print("No mode specified, defaulting to biased random walk.")
 
     # Calculate paths, saving intermittently
-    args = [(n, largest_cc_subgraph, output_dir, uniform_rw) for n in source_nodes]
+    args = [(largest_cc_subgraph, n, output_dir, uniform_rw) for n in source_nodes]
     n_workers = 4
     with Pool(processes=n_workers) as pool:
         results = pool.starmap(run_paths_for_targets, args)
