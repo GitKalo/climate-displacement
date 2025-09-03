@@ -21,7 +21,7 @@ Overview of files and folders:
 - All **data** used by scripts is under `data/`.
     - `hazards_displacements.csv` is a cleaner subset of the data used to analyze the hazard distributions for settlements and paths.
 - All notebooks for data **analysis and visualization** are under the main directory, e.g.:
+    - `hazard_analysis.ipynb` — Plot static and walk-based hazard distributions (main plots for preprint).
     - `walk_statistics.ipynb` — Summary statistics for random walks on entire network.
-    - `hazard_plot.ipynb` — Plot hazard distributions.
 
 Note that scripts and notebook often save to folders `out/` and `figs/`, which are created on-the-go locally and ignored by version control.
