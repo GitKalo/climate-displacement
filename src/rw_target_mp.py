@@ -116,23 +116,10 @@ largest_cc_subgraph = G.subgraph(largest_cc_nodes).copy()
 # Remove self-loops
 largest_cc_subgraph.remove_edges_from(nx.selfloop_edges(largest_cc_subgraph))
 
-# Directory to output json files to
-output_dir = 'out/sim_output_target'
-
-# Create directory if it does not exist yet
-if not os.path.exists(output_dir) : os.makedirs(output_dir)
-
 # Get potential source nodes
 nonzero_out_degree_nodes = [node for node in largest_cc_subgraph.nodes if largest_cc_subgraph.out_degree(node) > 0]
 
-# Get list of source nodes (nonzero out degree nodes that we have not processed yet)
-source_nodes = [n for n in nonzero_out_degree_nodes if not os.path.exists(f"{output_dir}/{n}.json")]
-
 if __name__ == "__main__":
-    # Print useful parameters
-    print(f"Using data from '{dataset_path}'.")
-    print(f"Saving results to '{output_dir}'.")
-
     # Get mode of simulating random walks (biased or uniform)
     try :
         mode = sys.argv[1]
@@ -146,6 +133,19 @@ if __name__ == "__main__":
         # If no mode specified, default to biased
         uniform_rw = False
         print("No mode specified, defaulting to biased random walk.")
+
+    # Directory to output json files to
+    output_dir = 'out/sim_output_target'
+
+    # Create directory if it does not exist yet
+    if not os.path.exists(output_dir) : os.makedirs(output_dir)
+
+    # Get list of source nodes (nonzero out degree nodes that we have not processed yet)
+    source_nodes = [n for n in nonzero_out_degree_nodes if not os.path.exists(f"{output_dir}/{n}.json")]
+
+    # Print useful parameters
+    print(f"Using data from '{dataset_path}'.")
+    print(f"Saving results to '{output_dir}'.")
 
     # Calculate paths, saving intermittently
     args = [(largest_cc_subgraph, n, output_dir, uniform_rw) for n in source_nodes]
