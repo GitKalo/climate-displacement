@@ -95,7 +95,7 @@ def run_paths_for_targets(G, source, output_dir='out/output', uniform_rw=False) 
         the source node. See `collect_paths` for details and stopping criteria.
     """
     # Calculate fixed number of paths for source
-    source_paths = collect_paths(G, source, num_paths=10, max_steps=10, uniform_rw=uniform_rw)
+    source_paths = collect_paths(G, source, num_paths=1000, max_steps=50, uniform_rw=uniform_rw)
 
     outfile = f"{output_dir}/{source}.json"
     with open(outfile, 'w') as f:
@@ -149,7 +149,7 @@ if __name__ == "__main__":
         print("No mode specified, defaulting to biased random walk.")
 
     # Calculate paths, saving intermittently
-    args = [(largest_cc_subgraph, n, output_dir, uniform_rw) for n in source_nodes]
-    n_workers = 1
+    args = [(largest_cc_subgraph, n, output_dir, uniform_rw) for n in source_nodes[:100]]
+    n_workers = 4
     with Pool(processes=n_workers) as pool:
         results = pool.starmap(run_paths_for_targets, args)
