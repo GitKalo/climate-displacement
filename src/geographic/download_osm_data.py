@@ -48,7 +48,7 @@ def main():
 
     print(f"Saving into zipfile: {savepath}...")
     with zipfile.ZipFile(savepath, 'w') as zfile:
-        zfile.write(download_path)
+        zfile.write(download_path, arcname=savefile)
 
     
     return
