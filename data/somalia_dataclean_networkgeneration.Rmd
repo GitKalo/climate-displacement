@@ -1,0 +1,1059 @@
+---
+title: "R Notebook"
+output: html_notebook
+editor_options: 
+  chunk_output_type: inline
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+
+library(dplyr)
+library(igraph)
+library(purrr)
+library(tibble)
+
+
+```{r}
+ # IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19 <- read_excel("~/Downloads/IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19.xlsx")
+library(readxl)
+IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19 <- read_excel("somalia/IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19.xlsx")
+View(IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19)
+
+View(IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19)
+table(IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19$`Somalia Location of Origin`)
+
+library(readxl)
+library(dplyr)
+library(stringr)
+library(stringi)
+library(janitor)
+library(tidyr)
+library(fuzzyjoin)   # for stringdist joins
+library(stringdist)  # for distances
+library(writexl)
+
+# =================== Config =====================
+path_in  <- "somalia/IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19.xlsx"
+path_out <- "somalia_settlement_cleaned_w19_mergevariants.xlsx"
+
+REG_COL <- "Region Name"
+DIS_COL <- "District Name"
+SET_COL <- "Settlement Name"
+
+# Fuzzy matching strictness (within the same Region, District)
+SHORT_LEN       <- 6   # names of length <= 6 allow:
+MAX_EDIT_SHORT  <- 1   # ...up to 1 edit
+MAX_EDIT_LONG   <- 2   # longer names allow up to 2 edits
+
+# =================== Read safely (all text) ===================
+df <- read_excel(path_in, col_types = "text", na = c("", "NA", "N/A"))
+
+req <- c(REG_COL, DIS_COL, SET_COL)
+miss <- setdiff(req, names(df))
+if (length(miss) > 0) stop("Missing required columns: ", paste(miss, collapse=", "))
+
+# =================== Normalisation helpers ===================
+# Basic: lower, trim, remove accents, remove funny quotes
+norm_basic <- function(x) {
+  x %>%
+    str_replace_all("[\u200B-\u200D\uFEFF]", "") %>%  # zero-width chars
+    str_squish() %>%
+    str_to_lower() %>%
+    str_replace_all("[‘’´`']", "") %>%
+    stringi::stri_trans_general("Latin-ASCII")
+}
+
+# Equivalence for matching: treat hyphen and spaces as the *same* separator,
+# keep only letters/digits/spaces, collapse multiple spaces.
+norm_equiv <- function(x) {
+  x %>%
+    norm_basic() %>%
+    str_replace_all("[-_]+", " ") %>%        # hyphen/underscore -> space
+    str_replace_all("[^a-z0-9\\s]", " ") %>% # drop other punctuation
+    str_replace_all("\\s+", " ") %>%         # collapse spaces
+    str_trim()
+}
+
+# =================== Build cluster mapping per (Region, District) ===================
+# For each (Region, District) we:
+#   1) collect all unique settlement variants with counts,
+#   2) build a graph linking variants within an edit-distance threshold (on norm_equiv),
+#   3) pick the most frequent *raw* spelling in each cluster as the canonical label.
+
+build_mapping_for_rd <- function(dd) {
+  # dd has .region_norm, .district_norm, .settle_raw, .settle_key
+  u <- dd %>%
+    filter(!is.na(.settle_key), .settle_key != "") %>%
+    count(.settle_key, .settle_raw, name = "freq_raw") %>%
+    group_by(.settle_key) %>%
+    mutate(freq_key = sum(freq_raw)) %>%
+    ungroup()
+
+  if (nrow(u) == 0) {
+    return(tibble(.settle_key = character(), canon_raw = character()))
+  }
+
+  keys <- u %>% distinct(.settle_key, freq_key)
+  s <- keys$.settle_key
+  n <- length(s)
+
+  # If only one normalized key, canonical raw = most common raw spelling of that key
+  if (n == 1) {
+    canon_raw <- u %>%
+      filter(.settle_key == s[1]) %>%
+      slice_max(freq_raw, n = 1, with_ties = FALSE) %>%
+      pull(.settle_raw)
+    return(tibble(.settle_key = s, canon_raw = canon_raw))
+  }
+
+  # Distances on the equivalence key (hyphen==space)
+  D  <- stringdistmatrix(s, s, method = "osa")
+  L  <- outer(nchar(s), nchar(s), pmax)
+  TH <- ifelse(L <= SHORT_LEN, MAX_EDIT_SHORT, MAX_EDIT_LONG)
+
+  # Adjacency: link if distance <= threshold
+  A <- (D <= TH) & (!diag(n))
+  g <- graph_from_adjacency_matrix(A, mode = "undirected", diag = FALSE)
+  comps <- components(g)$membership
+
+  cl_df <- tibble(.settle_key = s, cluster = comps) %>%
+    left_join(keys, by = ".settle_key")
+
+  # For each cluster:
+  #   choose the key with highest total freq,
+  #   then within that key choose the most frequent RAW spelling as canonical.
+  canon_per_cluster <- cl_df %>%
+    group_by(cluster) %>%
+    slice_max(freq_key, n = 1, with_ties = FALSE) %>%
+    ungroup() %>%
+    left_join(
+      u %>% group_by(.settle_key) %>%
+        slice_max(freq_raw, n = 1, with_ties = FALSE) %>%
+        ungroup() %>%
+        select(.settle_key, canon_raw = .settle_raw),
+      by = ".settle_key"
+    ) %>%
+    select(cluster, .settle_key, canon_raw)
+
+  cl_df %>%
+    left_join(canon_per_cluster %>% select(cluster, canon_raw), by = "cluster") %>%
+    select(.settle_key, canon_raw)
+}
+
+# Prepare normalized columns
+dat <- df %>%
+  mutate(
+    .row_id        = row_number(),
+    .region_norm   = norm_equiv(.data[[REG_COL]]),
+    .district_norm = norm_equiv(.data[[DIS_COL]]),
+    .settle_raw    = .data[[SET_COL]],
+    .settle_key    = norm_equiv(.data[[SET_COL]])
+  )
+
+# Build mapping for every (Region, District)
+mapping <- dat %>%
+  filter(.region_norm != "", .district_norm != "") %>%
+  group_by(.region_norm, .district_norm) %>%
+  group_modify(~ build_mapping_for_rd(.x)) %>%
+  ungroup()
+
+# Apply mapping to *all* rows (so variants like "Al Amin" and "Al-amin" are unified)
+dat2 <- dat %>%
+  left_join(mapping, by = c(".settle_key")) %>%
+  mutate(
+    !!SET_COL := ifelse(!is.na(canon_raw) & canon_raw != "", canon_raw, .settle_raw),
+    .changed   = !is.na(canon_raw) & canon_raw != "" & ( .settle_raw != canon_raw )
+  )
+
+# Corrections log
+corrections <- dat2 %>%
+  filter(.changed) %>%
+  transmute(
+    `Region Name`   = .data[[REG_COL]],
+    `District Name` = .data[[DIS_COL]],
+    from_settlement = .settle_raw,
+    to_settlement   = .data[[SET_COL]]
+  ) %>%
+  arrange(`Region Name`, `District Name`, from_settlement, to_settlement)
+
+# Final cleaned (drop helper cols)
+cleaned <- dat2 %>% select(-starts_with("."), -canon_raw)
+
+# =================== Export ===================
+write_xlsx(
+  list(
+    cleaned     = cleaned,      # "Settlement Name" is REPLACED in place
+    corrections = corrections
+  ),
+  path_out
+)
+
+cat(
+  "Saved:", path_out, "\n",
+  "Total replacements:", nrow(corrections), "\n"
+)
+
+
+```
+
+create the network edge list
+```{r}
+edges_raw <- IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19 %>% # 20220    79
+  transmute(
+    source = `Origin_District_country`,
+    target = `District Name`,
+    weight = `Total new arrivals since last week`
+  ) %>%
+  filter(!is.na(source), source != "",
+         !is.na(target), target != "",
+         !is.na(weight), weight > 0) # 20220     3
+
+edges <- IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19 %>%
+  transmute(
+    source = `Origin_District_country`,
+    target = `District Name`,
+    weight = `Total new arrivals since last week`
+  ) %>%
+  filter(!is.na(source), source != "",
+         !is.na(target), target != "",
+         !is.na(weight), weight > 0) %>%
+  group_by(source, target) %>%
+  summarise(weight = sum(weight, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(weight)) #352 × 3
+
+# 1) Ensure cumulative weights (sum duplicates just in case)
+edges_net <- edges_raw %>%
+  group_by(source, target) %>%
+  summarise(weight = sum(weight, na.rm = TRUE), .groups = "drop")
+
+# 2) Build directed graph (edge attribute 'weight' kept)
+g <- graph_from_data_frame(edges_net, directed = TRUE)
+
+```
+
+```{r}
+library(lubridate)   # <- needed for parse_date_time
+library(igraph)
+library(ggraph)
+library(ggrepel)
+
+# helper: parse numeric without readr
+num <- function(x) suppressWarnings(as.numeric(gsub("[^0-9.+-]", "", x)))
+
+df <- IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19
+
+# handle possible trailing spaces in headers
+date_col <- names(df)[str_detect(names(df), "^Date of Assessment\\s*$")]
+src_col  <- "Origin_District_country"
+tgt_col  <- "District Name"
+wgt_col  <- names(df)[str_detect(names(df), "^Total new arrivals since last week\\s*$")]
+
+# dates -> 3 equal time ranges
+df_dates <- df %>%
+  mutate(.date = lubridate::parse_date_time(
+    str_squish(.data[[date_col]]),
+    orders = c("ymd","dmy","mdy","Ymd HMS","dmy HMS","mdy HMS"),
+    tz = "UTC"
+  )) %>%
+  filter(!is.na(.date))
+
+breaks3 <- seq(min(df_dates$.date), max(df_dates$.date), length.out = 4)
+
+edges_by_period <- df_dates %>%
+  mutate(period = cut(.date, breaks = breaks3,
+                      labels = c("P1","P2","P3"),
+                      include_lowest = TRUE, right = TRUE)) %>%
+  transmute(
+    period,
+    source = str_squish(.data[[src_col]]),
+    target = str_squish(.data[[tgt_col]]),
+    weight = num(.data[[wgt_col]])
+  ) %>%
+  filter(!is.na(source), source != "",
+         !is.na(target), target != "",
+         !is.na(weight), weight > 0) %>%
+  group_by(period, source, target) %>%
+  summarise(weight = sum(weight, na.rm = TRUE), .groups = "drop")
+
+# --- Build igraphs per period (directed, cumulative) ---
+edges_split <- split(edges_by_period, edges_by_period$period)
+graphs <- lapply(edges_split, function(ed) {
+  igraph::graph_from_data_frame(ed[, c("source","target","weight")], directed = TRUE)
+})
+
+# --- (Optional) consistent layout across periods ---
+all_edges <- edges_by_period %>%
+  group_by(source, target) %>% summarise(weight = sum(weight), .groups = "drop")
+g_all <- graph_from_data_frame(all_edges, directed = TRUE)
+coords <- layout_with_fr(g_all)
+coords_df <- data.frame(name = V(g_all)$name,
+                        x = coords[,1], y = coords[,2], row.names = V(g_all)$name)
+
+# --- Quick plots (one per period) ---
+plot_period <- function(g, title){
+  xy <- coords_df[V(g)$name, c("x","y")]
+  ggraph(g, layout = "manual", x = xy$x, y = xy$y) +
+    geom_edge_link(aes(width = weight),
+                   arrow = arrow(length = unit(3, "mm"), type = "closed"),
+                   end_cap = circle(2, "mm"),
+                   alpha = 0.6) +
+    geom_node_point(size = 3) +
+    geom_node_text(aes(label = name), size = 3, repel = TRUE) +
+    scale_edge_width(range = c(0.2, 2)) +
+    ggtitle(title) + theme_void()
+}
+
+p1 <- plot_period(graphs$P1, "Period 1")
+p2 <- plot_period(graphs$P2, "Period 2")
+p3 <- plot_period(graphs$P3, "Period 3")
+
+# print(p1); print(p2); print(p3)
+
+# --- Export GraphML for Gephi/Cytoscape ---
+write_graph(graphs$P1, "network_P1.graphml", format = "graphml")
+write_graph(graphs$P2, "network_P2.graphml", format = "graphml")
+write_graph(graphs$P3, "network_P3.graphml", format = "graphml")
+
+
+
+stats_for_edges <- function(ed) {
+  g <- graph_from_data_frame(ed, directed = TRUE)   # uses column 'weight' if present
+
+  # undirected copy for clustering/path-length style metrics
+  g_u <- as.undirected(g, mode = "collapse")
+
+  n  <- gorder(g)
+  m  <- gsize(g)
+  tw <- sum(E(g)$weight, na.rm = TRUE)
+
+  comps <- components(g_u)
+  gc_id <- which.max(comps$csize)
+  v_gc  <- which(comps$membership == gc_id)
+  g_gc  <- induced_subgraph(g_u, v_gc)
+
+  tibble(
+    n_nodes           = n,
+    n_edges           = m,
+    total_weight      = tw,
+    mean_edge_weight  = if (m > 0) mean(E(g)$weight) else NA_real_,
+    density           = edge_density(g, loops = FALSE),
+    avg_out_degree    = mean(degree(g, mode = "out")),
+    avg_in_degree     = mean(degree(g, mode = "in")),
+    avg_out_strength  = mean(strength(g, mode = "out", weights = E(g)$weight)),
+    avg_in_strength   = mean(strength(g, mode = "in",  weights = E(g)$weight)),
+    reciprocity       = reciprocity(g, mode = "default"),          # unweighted
+    clustering_global = transitivity(g_u, type = "global"),        # undirected global
+    n_components      = comps$no,
+    giant_nodes       = comps$csize[gc_id],
+    giant_share       = comps$csize[gc_id] / n,
+    avg_path_len_gc   = if (gorder(g_gc) > 1) mean_distance(g_gc, directed = FALSE) else NA_real_,
+    diameter_gc       = if (gorder(g_gc) > 1) diameter(g_gc, directed = FALSE) else NA_real_
+  )
+}
+
+# ---- split by period and compute ----
+edges_split <- split(edges_by_period, edges_by_period$period)
+
+net_stats <- imap_dfr(
+  edges_split,
+  ~ stats_for_edges(select(.x, source, target, weight)) %>% mutate(period = .y),
+  .id = NULL
+) %>% relocate(period)
+
+net_stats
+```
+
+community change
+```{r}
+# ---- Build a graph per period ----
+edges_split <- split(edges_by_period, edges_by_period$period)
+graphs <- lapply(edges_split, function(ed) {
+  graph_from_data_frame(ed[, c("source","target","weight")], directed = TRUE)
+})
+
+# ---- Infomap on each period (directed + weighted) ----
+set.seed(123)  # reproducible
+run_infomap <- function(g) {
+  if (vcount(g) == 0 || gsize(g) == 0) return(NULL)
+  cl <- cluster_infomap(g, e.weights = E(g)$weight, nb.trials = 100)
+
+  # Stats
+  memb <- membership(cl)
+  sz   <- sizes(cl)
+  tib_stats <- tibble(
+    n_nodes        = vcount(g),
+    n_edges        = gsize(g),
+    n_communities  = length(sz),
+    max_comm_size  = max(sz),
+    mean_comm_size = mean(as.numeric(sz)),
+    modularity     = modularity(g, memb, weights = E(g)$weight)  # for reference
+  )
+
+  list(cl = cl, stats = tib_stats,
+       membership = tibble(node = names(memb), community = as.integer(memb)),
+       sizes = tibble(community = as.integer(names(sz)), size = as.integer(sz)))
+}
+
+infomap_by_period <- imap(graphs, ~ {res <- run_infomap(.x); list(period = .y, res = res)})
+
+# ---- Tidy outputs ----
+stats_tbl <- map_dfr(infomap_by_period, function(x) {
+  if (is.null(x$res)) return(tibble(period = x$period, n_nodes=0, n_edges=0,
+                                    n_communities=0, max_comm_size=NA,
+                                    mean_comm_size=NA, modularity=NA))
+  x$res$stats %>% mutate(period = x$period) %>% relocate(period)
+})
+
+membership_tbl <- map_dfr(infomap_by_period, function(x) {
+  if (is.null(x$res)) return(tibble())
+  x$res$membership %>% mutate(period = x$period) %>% relocate(period)
+})
+
+sizes_tbl <- map_dfr(infomap_by_period, function(x) {
+  if (is.null(x$res)) return(tibble())
+  x$res$sizes %>% mutate(period = x$period) %>% relocate(period)
+})
+
+# Inspect
+stats_tbl
+head(membership_tbl)
+sizes_tbl %>% arrange(period, desc(size))
+
+# period community  size
+#    <chr>      <int> <int>
+#  1 P1             1    37
+#  2 P1             5    14
+#  3 P1             3    10
+#  4 P1             2     4
+#  5 P1             4     3
+#  6 P2             1    57
+#  7 P2             2     4
+#  8 P3             2    25
+#  9 P3             4    18
+# 10 P3             1    16
+# 11 P3             3     5
+```
+
+
+
+
+
+
+```{r}
+# library(stringdist)
+# library(dplyr)
+# library(readxl)
+# df <- read_excel("~/Downloads/df.xlsx")
+# View(df)
+# region_gt <- unique(df$'Region Name')
+# district_gt <- unique(df$'District Name')
+# settlement_gt <- unique(df$'Settlement Name')
+# original_settlement_gt <- unique(df$`Somalia Location of Origin`)
+# not_aligned <- setdiff(original_settlement_gt, settlement_gt) #[1] 4539
+# 
+# settlements_corrected_1 <- read_csv("settlements_corrected_1-2.csv")
+# newsettlement_gt <- unique(settlements_corrected_1$`Settlement Name`)
+# neworiginal_settlement_gt <- unique(settlements_corrected_1$`Somalia Location of Origin (Corrected)`)
+# newnot_aligned <- setdiff(newsettlement_gt, neworiginal_settlement_gt) #2099
+# 
+# # Helper function for fuzzy match
+# fuzzy_match <- function(target, reference, method = "jw", threshold = 0.15) {
+#   sapply(target, function(x) {
+#     if (is.na(x) || trimws(x) == "") return(NA)
+#     distances <- stringdist::stringdist(tolower(x), tolower(reference), method = method)
+#     best_match <- reference[which.min(distances)]
+#     if (min(distances) <= threshold) best_match else x  # return original if too far
+#   })
+# }
+# 
+# df <- df %>%
+#   mutate(
+#     Region.Corrected = fuzzy_match('Somalia Region of Origin', region_gt),
+#     District.Corrected = fuzzy_match('Somalia.District.of.Origin', district_gt),
+#     Settlement.Corrected = fuzzy_match('Somalia.Location.of.Origin', settlement_gt)
+#   )
+
+```
+
+Load the network
+```{r}
+library(readr)
+settlements_corrected_1<- read_csv("settlements_corrected_1-2.csv")
+View(settlements_corrected_1_2)
+newsettlement_gt <- unique(settlements_corrected_1$`Settlement Name`)
+neworiginal_settlement_gt <- unique(settlements_corrected_1$`Somalia Location of Origin (Corrected)`)
+newnot_aligned <- setdiff(newsettlement_gt, neworiginal_settlement_gt)
+length(newnot_aligned) #2099
+
+length(settlements_corrected_1)
+length(table(settlements_corrected_1$`Settlement Name`)) #target 3085
+length(table(settlements_corrected_1$`Somalia Location of Origin (Corrected)`)) #source 4590
+
+(colMeans(is.na(settlements_corrected_1)))*100
+
+
+max(settlements_corrected_1$'Total new arrivals since last week') #213
+min(settlements_corrected_1$`Total new arrivals since last week`) #1
+hist(settlements_corrected_1$'Total new arrivals since last week')
+
+max(settlements_corrected_1$`Number of Males (18 and above) since last week`) #79
+min(settlements_corrected_1$`Number of Males (18 and above) since last week`) #0
+hist(settlements_corrected_1$`Number of Males (18 and above) since last week`)
+
+max(settlements_corrected_1$`Number of Females (18 and above) since last week`) #80
+min(settlements_corrected_1$`Number of Females (18 and above) since last week`) #0
+hist(settlements_corrected_1$`Number of Females (18 and above) since last week`)
+
+
+max(settlements_corrected_1$`Number of Children under 18 since last week`) #100
+min(settlements_corrected_1$`Number of Children under 18 since last week`) #0
+hist(settlements_corrected_1$`Number of Children under 18 since last week`)
+
+tail(sort(table(settlements_corrected_1$`Settlement Name`)),15) 
+# Madina    October    Waaberi Buulo-Fuur     Halgan     Busley    Mubarak 
+#        37         37         37         39         39         44         45 
+#    Bulsho    Daryeel    Towfiiq      Najax    Horseed  Danwadaag    Wadajir 
+#        51         52         52         53         60         67         75 
+#   Tawakal 
+#        89 
+tail(sort(table(settlements_corrected_1$`Somalia Location of Origin`)),15) 
+#       Qoryooley           Doolow             Luuq           Baidoa 
+#              79               81               85               89 
+#           Jilib           Yaaqle           Sabiib           Saakow 
+#              92               99              110              131 
+#         Kurmaan            Misir          Gurbaan         Diinsoor 
+#             132              155              184              199 
+#         October           Ufurow Berdale District 
+#             242              375              393 
+
+```
+
+
+```{r}
+dim(settlements_corrected_1)
+# 20019    26
+edges <- settlements_corrected_1 %>%
+  rename(
+    source = `Somalia Location of Origin (Corrected)`,
+    target = `Settlement Name`,
+    weight = `Total new arrivals since last week`
+  ) %>%
+  group_by(source, target) %>%
+  summarise(weight = sum(weight, na.rm = TRUE), .groups = "drop")
+
+dim(edges)
+#[1] 13620     3
+write.csv(edges, "cumulative_edges.csv", row.names = FALSE)
+
+colnames(edges) #"source" "target" "weight"
+dim(edges) #13620     3
+
+# check for the replicate edges
+duplicates <- edges %>%
+  group_by(source, target) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  filter(n > 1)
+# View duplicate pairs
+print(duplicates)
+
+```
+
+```{r}
+#Create the network
+library(igraph)
+g <- graph_from_data_frame(edges, directed = TRUE) #7016 13620
+
+#Visualize the network
+plot(g, edge.width = E(g)$weight / max(E(g)$weight) * 5, 
+     vertex.label.cex = 0.7,
+     main = "Network of Arrivals: Origin to Settlement")
+
+#community detection methods
+infomap_comm <- cluster_infomap(g)  #groups: 1270, mod: 0.54
+community_sizes <- sizes(infomap_comm)
+sorted_sizes <- sort(community_sizes, decreasing = TRUE)
+print(sorted_sizes)
+top_communities <- tibble(
+  community_id = names(sorted_sizes),
+  size = as.integer(sorted_sizes)
+)
+print(head(top_communities, 10))
+hist(sorted_sizes, breaks = 50, 
+     main = "Histogram of Community Sizes",
+     xlab = "Community Size",
+     ylab = "Number of Communities")
+
+walktrap_comm <- cluster_walktrap(g) #groups: 1072, mod: 0.71
+labelprop_comm <- cluster_label_prop(g) #groups: 4072, mod: 0.42
+eb_comm <- cluster_edge_betweenness(g, directed = TRUE) #
+
+#Choosing a cutoff for "least important" communities 
+
+important_communities <- which(sorted_sizes >= 5)
+length(important_communities) #490
+
+important_communities <- which(sorted_sizes >= 10)
+length(important_communities) #152
+
+#Community-level Edge List Aggregate Analysis
+edges$source_comm <- filtered_membership[match(edges$source, names(filtered_membership))]
+edges$target_comm <- filtered_membership[match(edges$target, names(filtered_membership))]
+community_edges <- edges %>%
+  group_by(source_comm, target_comm) %>%
+  summarise(weight = sum(weight), .groups = "drop")
+
+community_df <- tibble(
+  community = names(sorted_sizes),
+  size = as.integer(sorted_sizes)
+)
+
+# Add percent of total
+community_df <- community_df %>%
+  mutate(percent = 100 * size / sum(size))
+
+# Add label for major/other
+min_size <- 10
+community_df <- community_df %>%
+  mutate(type = ifelse(size >= min_size, "Major", "Other"))
+
+#Add "Other" as an Aggregate Row
+major_communities <- community_df %>% filter(type == "Major")
+other_community <- community_df %>% filter(type == "Other") %>%
+  summarise(
+    community = "Other",
+    size = sum(size),
+    percent = sum(percent),
+    type = "Other"
+  )
+desc_table <- bind_rows(major_communities, other_community)
+#Sort by Size Descending
+desc_table <- desc_table %>% arrange(desc(size))
+#Display/Export
+print(desc_table)
+# Optionally save to CSV:
+write.csv(desc_table, "community_descriptive_table.csv", row.names = FALSE)
+
+#assign the community label to all the nodes
+
+
+
+```
+```{r}
+# a) Source nodes and their districts
+sources <- settlements_corrected_1 %>%
+  select(node = `Somalia Location of Origin (Corrected)`, 
+         district = Origin_District_country)
+
+# b) Target nodes and their districts
+targets <- settlements_corrected_1 %>%
+  select(node = `Settlement Name`, 
+         district = `District Name`)
+
+# c) Combine and remove duplicates
+node_district <- bind_rows(sources, targets) %>%
+  distinct(node, district)
+
+head(node_district)
+length(unique(node_district$district)) #73
+length(unique(node_district$node)) #7016 8017
+# check the dublicate of the node_district$node
+
+#Count frequency of each node
+all_nodes <- bind_rows(sources, targets)
+node_freq <- all_nodes %>%
+  group_by(node, district) %>%
+  summarise(frequency = n(), .groups = "drop")
+
+#For each node, keep only the district with highest frequency
+node_district_unique <- node_freq %>%
+  group_by(node) %>%
+  slice_max(order_by = frequency, n = 1, with_ties = FALSE) %>%
+  ungroup()
+head(node_district_unique)
+length(unique(node_district_unique$district)) #73
+length(unique(node_district_unique$node)) #7016
+
+
+write.csv(node_district_unique, "node_district_unique.csv", row.names = FALSE)
+
+
+```
+
+summarize the reasons for displacement by origin district
+```{r}
+library(ggplot2)
+ #Prepare the Reason Ratios Table
+# Count reasons per district
+reason_counts <- settlements_corrected_1 %>%
+  group_by(`Somalia District of Origin`, `Reason of Displacement`) %>%
+  summarise(n = n(), .groups = "drop")
+dim(reason_counts)
+#[1] 221   3
+
+# Calculate total per district
+district_totals <- reason_counts %>%
+  group_by(`Somalia District of Origin`) %>%
+  summarise(total = sum(n), .groups = "drop")
+dim(district_totals)
+#[1] 72  2
+
+# Join and calculate ratio
+reason_ratios <- reason_counts %>%
+  left_join(district_totals, by = "Somalia District of Origin") %>%
+  mutate(ratio = n / total)
+head(reason_ratios)
+
+#All Districts as Facets
+ggplot(reason_ratios, aes(x = `Reason of Displacement`, y = ratio, fill = `Reason of Displacement`)) +
+  geom_bar(stat = "identity") +
+  facet_wrap(~ `Somalia District of Origin`, scales = "free_y") +
+  labs(title = "Reason Ratios for Displacement by District", y = "Ratio", x = "Reason") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+
+# Remove NA reasons or districts
+clean_reason_ratios <- reason_ratios %>%
+  filter(!is.na(`Reason of Displacement`), !is.na(`Somalia District of Origin`))
+
+# Compute total records for each district (to order the facets)
+district_order <- clean_reason_ratios %>%
+  group_by(District = `Somalia District of Origin`) %>%
+  summarise(total = sum(n)) %>%
+  arrange(desc(total)) %>%
+  pull(District)
+
+# Make District an ordered factor for facet_wrap
+clean_reason_ratios <- clean_reason_ratios %>%
+  mutate(
+    District = factor(`Somalia District of Origin`, levels = district_order),
+    Reason = `Reason of Displacement`
+  )
+
+# Plot faceted pie charts, ordered by record count
+ggplot(clean_reason_ratios, aes(x = "", y = ratio, fill = Reason)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  facet_wrap(~ District) +
+  labs(title = "Reasons for Displacement by District (Ordered, NAs Removed)",
+       y = "",
+       x = "",
+       fill = "Reason") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 10))
+#number of records (size) for each district
+district_size <- settlements_corrected_1 %>%
+  filter(!is.na(`Somalia District of Origin`)) %>%
+  group_by(`Somalia District of Origin`) %>%
+  summarise(size = n()) %>%
+  arrange(desc(size))
+
+table_ratios <- district_size %>%
+  select(District, size, district_ratio) %>%
+  arrange(desc(size))
+
+print(district_size)
+print(table_ratios)
+
+```
+
+```{r}
+library(dplyr)
+region_reason <- settlements_corrected_1 %>%
+  filter(!is.na(`Somalia Region of Origin`), !is.na(`Reason of Displacement`)) %>%
+  group_by(Region = `Somalia Region of Origin`, Reason = `Reason of Displacement`) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(Region) %>%
+  mutate(total = sum(n), ratio = n / total) %>%
+  ungroup()
+
+region_order <- region_reason %>%
+  group_by(Region) %>%
+  summarise(total = unique(total)) %>%
+  arrange(desc(total)) %>%
+  pull(Region)
+
+region_reason <- region_reason %>%
+  mutate(Region = factor(Region, levels = region_order))
+
+library(ggplot2)
+
+ggplot(region_reason, aes(x = "", y = ratio, fill = Reason)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar(theta = "y") +
+  facet_wrap(~ Region) +
+  labs(title = "Reasons for Displacement by Region (Ordered by Record Count)",
+       x = "", y = "", fill = "Reason") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 11))
+
+scale_fill_brewer(region_reason)
+
+```
+
+```{r}
+
+# Compute region_flow as before
+region_flow <- settlements_corrected_1 %>%
+  filter(!is.na(`Somalia Region of Origin`), !is.na(`Region Name`)) %>%
+  group_by(source_region = `Somalia Region of Origin`,
+           target_region = `Region Name`) %>%
+  summarise(total_arrivals = sum(as.numeric(`Total new arrivals since last week`), na.rm = TRUE), .groups = "drop")
+
+# Normalize total_arrivals to [1, 10]
+region_flow <- region_flow %>%
+  mutate(total_arrivals_normalized = 1 + 9 * (total_arrivals - min(total_arrivals)) / (max(total_arrivals) - min(total_arrivals)))
+View(region_flow)
+
+
+
+
+
+# install.packages("maptools")
+# library(maptools)
+# data(wrld_simpl)
+
+
+```
+
+
+```{r}
+# Basic properties
+num_nodes <- gorder(g)                     # Number of nodes
+num_edges <- gsize(g)                      # Number of edges
+density <- edge_density(g)                 # Density of the network
+is_directed <- is.directed(g)              # TRUE/FALSE
+
+# Degree stats
+degree_stats <- degree(g, mode = "all")
+mean_degree <- mean(degree_stats)
+max_degree <- max(degree_stats)
+min_degree <- min(degree_stats)
+
+# Connected components
+components <- components(g)
+num_components <- components$no
+largest_component_size <- max(components$csize)
+
+# Reciprocity (for directed networks)
+reciprocity_val <- reciprocity(g)
+
+# Diameter and average path length (only on the largest component)
+giant <- induced_subgraph(g, which(components$membership == which.max(components$csize)))
+diameter_val <- diameter(giant, directed = is_directed)
+avg_path_length <- average.path.length(giant, directed = is_directed)
+
+# Clustering coefficient (transitivity)
+global_clustering <- transitivity(g, type = "global")
+avg_local_clustering <- transitivity(g, type = "average")
+
+# Print a summary
+cat("\nNETWORK SUMMARY STATISTICS\n")
+cat("Number of nodes:        ", num_nodes, "\n")
+cat("Number of edges:        ", num_edges, "\n")
+cat("Directed:               ", is_directed, "\n")
+cat("Density:                ", round(density, 4), "\n")
+cat("Mean degree:            ", round(mean_degree, 2), "\n")
+cat("Max degree:             ", max_degree, "\n")
+cat("Min degree:             ", min_degree, "\n")
+cat("Number of components:   ", num_components, "\n")
+cat("Largest component size: ", largest_component_size, "\n")
+cat("Reciprocity:            ", round(reciprocity_val, 4), "\n")
+cat("Diameter (giant comp.): ", diameter_val, "\n")
+cat("Avg path length (giant):", round(avg_path_length, 2), "\n")
+cat("Global clustering:      ", round(global_clustering, 4), "\n")
+cat("Avg local clustering:   ", round(avg_local_clustering, 4), "\n")
+
+
+
+# Identify components
+comps <- components(g)
+# Find the largest component
+giant_comp_nodes <- which(comps$membership == which.max(comps$csize))
+g_giant <- induced_subgraph(g, giant_comp_nodes)
+
+num_nodes_giant <- gorder(g_giant)
+num_edges_giant <- gsize(g_giant)
+density_giant <- edge_density(g_giant)
+mean_degree_giant <- mean(degree(g_giant, mode = "all"))
+diameter_giant <- diameter(g_giant, directed = is.directed(g_giant))
+avg_path_length_giant <- average.path.length(g_giant, directed = is.directed(g_giant))
+clustering_giant <- transitivity(g_giant, type = "global")
+avg_local_clustering_giant <- transitivity(g_giant, type = "average")
+reciprocity_giant <- reciprocity(g_giant)
+
+cat("\nLARGEST COMPONENT SUMMARY\n")
+cat("Nodes:                 ", num_nodes_giant, "\n")
+cat("Edges:                 ", num_edges_giant, "\n")
+cat("Density:               ", round(density_giant, 4), "\n")
+cat("Mean degree:           ", round(mean_degree_giant, 2), "\n")
+cat("Diameter:              ", diameter_giant, "\n")
+cat("Average path length:   ", round(avg_path_length_giant, 2), "\n")
+cat("Global clustering:     ", round(clustering_giant, 4), "\n")
+cat("Avg local clustering:  ", round(avg_local_clustering_giant, 4), "\n")
+cat("Reciprocity:           ", round(reciprocity_giant, 4), "\n")
+
+# Find Hubs in the Giant Component
+deg_giant <- degree(g_giant, mode = "all")
+top_hubs <- names(sort(deg_giant, decreasing = TRUE))[1:10]
+cat("Top 10 hubs in the largest component:\n")
+print(top_hubs)
+
+```
+
+```{r}
+library(png)
+library(grid)
+library(ggplot2)
+#Display the PNG Map in Base R Graphics
+library(png)
+dev.off()
+quartz()
+
+library(png)
+img <- readPNG("newplot.png")
+par(mar = c(0, 0, 0, 0))
+plot(1, type = "n", xlab = "", ylab = "",
+     xlim = c(0, ncol(img)), ylim = c(0, nrow(img)), asp = 1)
+rasterImage(img, 0, 0, ncol(img), nrow(img))
+
+
+# 3. Prepare your region names
+regions <- c(
+    "Awdal",
+    "Woqooyi Galbeed",
+    "Togdheer",
+    "Sool",
+    "Sanaag",
+    "Bari",
+    "Nugaal",
+    "Mudug",
+    "Galgaduud",
+    "Hiraan",
+    "Middle Shabelle",
+    "Banadir",
+    "Lower Shabelle",
+    "Bay",
+    "Bakool",
+    "Gedo",
+    "Middle Juba",
+    "Lower Juba"
+)
+
+cat("Click the centroid of each region, in this order:\n")
+print(regions)
+
+# 4. Click points—DO NOT close the plot window!
+coords <- locator(n = length(regions))
+
+#Build Your Region Coordinates Table
+region_coords <- data.frame(
+  region = regions,
+  x = coords$x,
+  y = coords$y
+)
+print(region_coords)
+
+#Save or Use the Table
+write.csv(region_coords, "region_coords.csv", row.names = FALSE)
+
+pdf("my_flow_map.pdf", width = 10, height = 8) 
+#flow data
+region_flow <- settlements_corrected_1 %>%
+  filter(
+    !is.na(`Somalia Region of Origin`),
+    !is.na(`Region Name`),
+    !is.na(`Total new arrivals since last week`)
+  ) %>%
+  group_by(source_region = `Somalia Region of Origin`,
+           target_region = `Region Name`) %>%
+  summarise(
+    total_arrivals = sum(as.numeric(`Total new arrivals since last week`), na.rm = TRUE),
+    .groups = "drop"
+  )
+
+#Normalize for Plotting
+region_flow <- region_flow %>%
+  mutate(arrivals_norm = 1 + 4 * (total_arrivals - min(total_arrivals)) / (max(total_arrivals) - min(total_arrivals)))
+
+#Merge Coordinates with Flows
+library(dplyr)
+
+# Merge region coordinates into flow data
+region_flow_xy <- region_flow %>%
+  left_join(region_coords, by = c("source_region" = "region")) %>%
+  rename(x_start = x, y_start = y) %>%
+  left_join(region_coords, by = c("target_region" = "region")) %>%
+  rename(x_end = x, y_end = y)
+
+# Square-root scaling for line width (1 to 15)
+min_width <- 1
+max_width <- 15
+region_flow_xy <- region_flow_xy %>%
+  mutate(flow_width = min_width + (max_width - min_width) *
+           (sqrt(total_arrivals) - sqrt(min(total_arrivals))) /
+           (sqrt(max(total_arrivals)) - sqrt(min(total_arrivals))))
+
+draw_curve <- function(x1, y1, x2, y2, col = "red", lwd = 2, curvature = 0.2) {
+  t <- seq(0, 1, length = 100)
+  xm <- (x1 + x2) / 2 + curvature * (y2 - y1)
+  ym <- (y1 + y2) / 2 - curvature * (x2 - x1)
+  x <- (1 - t)^2 * x1 + 2 * (1 - t) * t * xm + t^2 * x2
+  y <- (1 - t)^2 * y1 + 2 * (1 - t) * t * ym + t^2 * y2
+  lines(x, y, col = col, lwd = lwd)
+}
+
+library(png)
+img <- readPNG("newplot.png")
+par(mar = c(0, 0, 0, 0))
+
+# Plot background map
+plot(1, type = "n", xlab = "", ylab = "",
+     xlim = c(0, ncol(img)), ylim = c(0, nrow(img)), asp = 1)
+rasterImage(img, 0, 0, ncol(img), nrow(img))
+
+# Optional: plot region points and names
+points(region_coords$x, region_coords$y, col = "red", pch = 19)
+text(region_coords$x, region_coords$y, labels = region_coords$region, pos = 3, cex = 0.5, col = "black")
+
+# Plot curved, weighted flows (excluding self-loops)
+non_self_loops <- region_flow_xy %>% filter(source_region != target_region)
+
+for(i in 1:nrow(non_self_loops)) {
+  draw_curve(
+    x1 = non_self_loops$x_start[i],
+    y1 = non_self_loops$y_start[i],
+    x2 = non_self_loops$x_end[i],
+    y2 = non_self_loops$y_end[i],
+    col = rgb(0.8, 0.1, 0.1, alpha = 0.5),
+    lwd = non_self_loops$flow_width[i],
+    curvature = 0.2
+  )
+}
+
+# Optional: plot self-loops as circles
+self_loops <- region_flow_xy %>% filter(source_region == target_region)
+if(nrow(self_loops) > 0) {
+  symbols(
+    self_loops$x_start,
+    self_loops$y_start,
+    circles = sqrt(self_loops$total_arrivals / max(region_flow_xy$total_arrivals)) * 12,
+    inches = FALSE,
+    add = TRUE,
+    fg = rgb(0.2, 0.4, 0.8, alpha = 0.7),
+    bg = rgb(0.2, 0.4, 0.8, alpha = 0.25)
+  )
+}
+
+pdf("my_flow_map.pdf", width = 10, height = 8) 
+
+
+```
