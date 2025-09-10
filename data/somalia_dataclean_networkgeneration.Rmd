@@ -5,9 +5,6 @@ editor_options:
   chunk_output_type: inline
 ---
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
-
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
 
 
 library(dplyr)
@@ -15,7 +12,8 @@ library(igraph)
 library(purrr)
 library(tibble)
 
-
+Import dataset
+Data cleaning on settlement name column
 ```{r}
  # IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19 <- read_excel("~/Downloads/IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19.xlsx")
 library(readxl)
@@ -199,7 +197,7 @@ cat(
 
 ```
 
-create the network edge list
+create the network edge list where Source is $Origin_District_country$ and Target is $District Name$
 ```{r}
 edges_raw <- IOM_DTM_ETT_SOM_Tracker_sinceFeb2025_w19 %>% # 20220    79
   transmute(
@@ -234,6 +232,7 @@ g <- graph_from_data_frame(edges_net, directed = TRUE)
 
 ```
 
+Temporal network generation under 3 period separation
 ```{r}
 library(lubridate)   # <- needed for parse_date_time
 library(igraph)
@@ -284,14 +283,6 @@ graphs <- lapply(edges_split, function(ed) {
   igraph::graph_from_data_frame(ed[, c("source","target","weight")], directed = TRUE)
 })
 
-# --- (Optional) consistent layout across periods ---
-all_edges <- edges_by_period %>%
-  group_by(source, target) %>% summarise(weight = sum(weight), .groups = "drop")
-g_all <- graph_from_data_frame(all_edges, directed = TRUE)
-coords <- layout_with_fr(g_all)
-coords_df <- data.frame(name = V(g_all)$name,
-                        x = coords[,1], y = coords[,2], row.names = V(g_all)$name)
-
 # --- Quick plots (one per period) ---
 plot_period <- function(g, title){
   xy <- coords_df[V(g)$name, c("x","y")]
@@ -318,7 +309,7 @@ write_graph(graphs$P2, "network_P2.graphml", format = "graphml")
 write_graph(graphs$P3, "network_P3.graphml", format = "graphml")
 
 
-
+# general summary of statistics of three networks
 stats_for_edges <- function(ed) {
   g <- graph_from_data_frame(ed, directed = TRUE)   # uses column 'weight' if present
 
@@ -366,7 +357,7 @@ net_stats <- imap_dfr(
 net_stats
 ```
 
-community change
+Community detection and the periodic change under Infomap Algorithem
 ```{r}
 # ---- Build a graph per period ----
 edges_split <- split(edges_by_period, edges_by_period$period)
@@ -441,44 +432,7 @@ sizes_tbl %>% arrange(period, desc(size))
 
 
 
-
-```{r}
-# library(stringdist)
-# library(dplyr)
-# library(readxl)
-# df <- read_excel("~/Downloads/df.xlsx")
-# View(df)
-# region_gt <- unique(df$'Region Name')
-# district_gt <- unique(df$'District Name')
-# settlement_gt <- unique(df$'Settlement Name')
-# original_settlement_gt <- unique(df$`Somalia Location of Origin`)
-# not_aligned <- setdiff(original_settlement_gt, settlement_gt) #[1] 4539
-# 
-# settlements_corrected_1 <- read_csv("settlements_corrected_1-2.csv")
-# newsettlement_gt <- unique(settlements_corrected_1$`Settlement Name`)
-# neworiginal_settlement_gt <- unique(settlements_corrected_1$`Somalia Location of Origin (Corrected)`)
-# newnot_aligned <- setdiff(newsettlement_gt, neworiginal_settlement_gt) #2099
-# 
-# # Helper function for fuzzy match
-# fuzzy_match <- function(target, reference, method = "jw", threshold = 0.15) {
-#   sapply(target, function(x) {
-#     if (is.na(x) || trimws(x) == "") return(NA)
-#     distances <- stringdist::stringdist(tolower(x), tolower(reference), method = method)
-#     best_match <- reference[which.min(distances)]
-#     if (min(distances) <= threshold) best_match else x  # return original if too far
-#   })
-# }
-# 
-# df <- df %>%
-#   mutate(
-#     Region.Corrected = fuzzy_match('Somalia Region of Origin', region_gt),
-#     District.Corrected = fuzzy_match('Somalia.District.of.Origin', district_gt),
-#     Settlement.Corrected = fuzzy_match('Somalia.Location.of.Origin', settlement_gt)
-#   )
-
-```
-
-Load the network
+Detailed Summary of settlement
 ```{r}
 library(readr)
 settlements_corrected_1<- read_csv("settlements_corrected_1-2.csv")
@@ -531,7 +485,7 @@ tail(sort(table(settlements_corrected_1$`Somalia Location of Origin`)),15)
 
 ```
 
-
+Create the network based on settlement level
 ```{r}
 dim(settlements_corrected_1)
 # 20019    26
@@ -559,9 +513,6 @@ duplicates <- edges %>%
 # View duplicate pairs
 print(duplicates)
 
-```
-
-```{r}
 #Create the network
 library(igraph)
 g <- graph_from_data_frame(edges, directed = TRUE) #7016 13620
@@ -638,8 +589,6 @@ write.csv(desc_table, "community_descriptive_table.csv", row.names = FALSE)
 
 #assign the community label to all the nodes
 
-
-
 ```
 ```{r}
 # a) Source nodes and their districts
@@ -682,7 +631,8 @@ write.csv(node_district_unique, "node_district_unique.csv", row.names = FALSE)
 
 ```
 
-summarize the reasons for displacement by origin district
+Summarise the reasons for displacement by origin district
+Pie chart on the district level displacement reason
 ```{r}
 library(ggplot2)
  #Prepare the Reason Ratios Table
@@ -761,7 +711,7 @@ print(district_size)
 print(table_ratios)
 
 ```
-
+Pie chart on the region level displacement reason
 ```{r}
 library(dplyr)
 region_reason <- settlements_corrected_1 %>%
@@ -796,35 +746,10 @@ ggplot(region_reason, aes(x = "", y = ratio, fill = Reason)) +
         strip.text = element_text(size = 11))
 
 scale_fill_brewer(region_reason)
-
-```
-
-```{r}
-
-# Compute region_flow as before
-region_flow <- settlements_corrected_1 %>%
-  filter(!is.na(`Somalia Region of Origin`), !is.na(`Region Name`)) %>%
-  group_by(source_region = `Somalia Region of Origin`,
-           target_region = `Region Name`) %>%
-  summarise(total_arrivals = sum(as.numeric(`Total new arrivals since last week`), na.rm = TRUE), .groups = "drop")
-
-# Normalize total_arrivals to [1, 10]
-region_flow <- region_flow %>%
-  mutate(total_arrivals_normalized = 1 + 9 * (total_arrivals - min(total_arrivals)) / (max(total_arrivals) - min(total_arrivals)))
-View(region_flow)
-
-
-
-
-
-# install.packages("maptools")
-# library(maptools)
-# data(wrld_simpl)
-
-
 ```
 
 
+Component analysis on networks
 ```{r}
 # Basic properties
 num_nodes <- gorder(g)                     # Number of nodes
@@ -906,9 +831,9 @@ deg_giant <- degree(g_giant, mode = "all")
 top_hubs <- names(sort(deg_giant, decreasing = TRUE))[1:10]
 cat("Top 10 hubs in the largest component:\n")
 print(top_hubs)
-
 ```
 
+Visulisation of flow on the Somalia map
 ```{r}
 library(png)
 library(grid)
@@ -1054,6 +979,7 @@ if(nrow(self_loops) > 0) {
 }
 
 pdf("my_flow_map.pdf", width = 10, height = 8) 
+
 
 
 ```
