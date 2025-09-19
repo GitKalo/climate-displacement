@@ -14,9 +14,9 @@ import os
 def main():
     date = '250905'
 
-    savedir = './data/'
-    zipped_osm = f"{savedir}/osm_data.zip"
-    zipped_elements = f"{savedir}/road_network_elements.zip"
+    savedir = '/data/big/fmalveiro/complexity72/'
+    zipped_osm = os.path.join(savedir, 'osm_data.zip')
+    zipped_elements = os.path.join(savedir, 'DEFAULT-road_network_elements.zip')
 
     osmfile = f"somalia-{date}-highways.osm.pbf"
 
