@@ -21,8 +21,12 @@ def main():
     osmfile = f"somalia-{date}-highways.osm.pbf"
 
     node_vars = ['id', 'geometry']
-    edge_vars = ['u', 'v', 'length', 'geometry']
+    edge_vars = ['u', 'v', 'highway', 'length', 'geometry']
 
+    # zip library will write within the zipfile, not overwriting it...
+    if os.path.exists(zipped_elements):
+        print(f"{zipped_elements} exists. Removing...")
+        os.remove(zipped_elements)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         with zipfile.ZipFile(zipped_osm, 'r') as zfile:
