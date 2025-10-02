@@ -28,6 +28,9 @@ def get_graph(nodes_gdf, edges_gdf, node_vars, edge_vars, graph_attrs=None):
     
     for columns, gdf in zip((node_vars, edge_vars), (nodes_gdf, edges_gdf)):
         assert all([column in gdf.columns for column in columns])
+
+    nodes_gdf = nodes_gdf[node_vars]
+    edges_gdf = edges_gdf[edge_vars]
         
     
     # pass from vertex ids to vertex index in dataframe: map ids to vertex index
@@ -89,9 +92,9 @@ def get_graph(nodes_gdf, edges_gdf, node_vars, edge_vars, graph_attrs=None):
     
     print(f"Adding edge properties {eprops.keys().tolist()}...")
     for key, value in eprops.items():
-        if key == 'geometry':
+        if key in ('highway', 'geometry'):
             continue
-            
+
         graph.edge_properties[key] = graph.new_edge_property(dtype_mapping[value.name], vals=edges_gdf[key].to_numpy())
     
     return graph, nodes_gdf, edges_gdf
@@ -99,8 +102,7 @@ def get_graph(nodes_gdf, edges_gdf, node_vars, edge_vars, graph_attrs=None):
 
 def keep_lcc(graph, nodes_gdf, edges_gdf, node_vars, edge_vars):
     """
-    In this case, an analysis using the LCC should suffice, if it covered the entire country.
-    Spoiler: it does not.
+
     """
     comps, hist = graph_tool.topology.label_components(graph, directed=False)
     lcc_idx = np.argmax(hist)
@@ -213,6 +215,7 @@ def main():
     elements_zip = 'DEFAULT-road_network_elements.zip'
 
     crs = 'epsg:20539'
+    tweak_graph = 'lcc'
 
     loadpath = os.path.join('/data/big/fmalveiro/complexity72', elements_zip)
 
@@ -225,7 +228,7 @@ def main():
     print(f"There are {nodes_gdf.shape[0]} nodes and {edges_gdf.shape[0]} edges.")
 
     node_vars = nodes_gdf.columns
-    edge_vars = edges_gdf.columns
+    edge_vars = ['u', 'v', 'length', 'highway', 'geometry']
 
     print('Getting the graph...')
     graph, nodes_gdf, edges_gdf = get_graph(nodes_gdf, edges_gdf, node_vars, edge_vars)
@@ -234,10 +237,17 @@ def main():
     print(graph)
 
 
-    #print('Connecting disconnected components...')
-    #graph, nodes_gdf, edges_gdf = connect_components(graph, nodes_gdf, edges_gdf, node_vars, edge_vars, crs)
+    if tweak_graph == 'lcc':
+        print('Keeping only LCC...')
+        graph, nodes_gdf, edges_gdf = keep_lcc(graph, nodes_gdf, edges_gdf, node_vars, edge_vars)
+    elif tweak_graph == 'connect':
+        print('Connecting disconnected components...')
+        graph, nodes_gdf, edges_gdf = connect_components(graph, nodes_gdf, edges_gdf, node_vars, edge_vars, crs)
+    elif tweak_graph is not None:
+        raise ValueError(tweak_graph)
 
-    #print(f"Finally, there are {nodes_gdf.shape[0]} nodes and {edges_gdf.shape[0]} edges left.")
+    
+    print(f"Finally, there are {nodes_gdf.shape[0]} nodes and {edges_gdf.shape[0]} edges left.")
 
     print('Saving the graph...')
     save_graph(graph, savedir, 'somalia-road_network_graph.gt.gz')
@@ -247,7 +257,7 @@ def main():
             gdf.to_file(os.path.join(tmpdir, f"somalia-{date}-{element}.geojson"))
 
         # zipfile does not overwrite, we must save again
-        savepath = os.path.join(savedir, elements_zip)
+        savepath = os.path.join(savedir, elements_zip.replace('DEFAULT-', ''))
         if os.path.exists(savepath):
             os.remove(savepath)
         

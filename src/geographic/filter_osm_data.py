@@ -13,7 +13,7 @@ import os
 def main():
     date = '250905'
     
-    savedir = './data/'
+    savedir = '/data/big/fmalveiro/complexity72/'
     zipped = f"{savedir}/osm_data.zip"
     osmfile = f"somalia-{date}.osm.pbf"
     savefile = f"somalia-{date}-highways.osm.pbf"
