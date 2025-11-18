@@ -7,3 +7,6 @@ figs/
 
 # Pycache
 src/__pycache__/
+
+# Pyenv version control
+.python-version
