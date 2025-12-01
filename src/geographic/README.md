@@ -10,6 +10,12 @@ Descritpion and running order follows. It is assumed that administrative level 2
 `extract_road_network_elements.py`: extracts the elements of the road network out of the `somalia-{date}-highways.osm.pbf`. Creates zip file `DEFAULT-road_network_elements.zip`. Within it, it stores `somalia-{date}-{element}.geojson`, where `element \in {nodes, edges}`.
 
 
+`extract_buildings.py`: extracts buildings from OSM data contained in `somalia-{date}.osm.pbf`. Saves data in `somalia-{date}-buildings.osm.pbf`, within `osm_data.zip`.
+
+
+`simplify_road_network.py`: uses `neatnet` to simplify the road network. Creates `f"somalia-{date}-{element}_simplified.geojson"`, for `element` in `(nodes, edges)`. Files are saved within `road_network_elements.zip`.
+
+
 `construct_road_network_graph.py`: constructs the graph of the road network using the extracted elements in `DEFAULT-road_network_elements.zip` -- edges correspond to road segments; nodes  link road segments. As it is set, it only keeps the Largest Connected Component (LCC) of the road network graph. Creates file `somalia-road_network_graph.gt.gz` and `road_network_elements.zip`.
 
 
