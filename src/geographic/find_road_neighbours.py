@@ -3,8 +3,23 @@ import libpysal as lp
 import pandas as pd
 import numpy as np
 
+import argparse
 import tqdm
+import sys
 import os
+
+
+
+def argparser():
+    parser = argparse.ArgumentParser(
+                    prog=sys.argv[0],
+                    description='What the program does',
+                    epilog='Text at the bottom of help'
+    )
+
+    parser.add_argument('--network_type', type=str, choices=('walking', 'cycling', 'driving', 'driving+service', 'all'), default='all')
+    return parser
+
 
 
 
@@ -13,15 +28,21 @@ def borders(geom1, geom2):
 
 
 
-def main():
+def main(args):
+    network_type = args.network_type
+    
     to_crs = 'epsg:20539'
     loaddir = '/data/big/fmalveiro/complexity72/'
     savedir = './data/'
+    date = '251124'
 
     adm_level = 2
     adm_loadpath = os.path.join(savedir, f"gadm41_SOM_{adm_level}.json.zip")
-    edges_loadpath = os.path.join(loaddir, 'road_network_elements.zip!somalia-250905-edges.geojson')
+    edges_loadpath = os.path.join(loaddir, f"road_network_elements-{network_type}.zip!somalia-{date}-edges.geojson")
 
+    neighbours_savepath = os.path.join(savedir, f"geographical_neighbours-{network_type}.csv")
+
+    
     print('Loading adm gdf...')
     adm_gdf = gpd.read_file(adm_loadpath)
 
@@ -71,10 +92,12 @@ def main():
     road_adjlist = road_adjlist.rename({'weight': 'road_connected'}, axis=1)
 
     print('Saving to file...')
-    road_adjlist.to_csv(os.path.join(savedir, 'geographical_neighbours.csv'), index=False)
+    road_adjlist.to_csv(neighbours_savepath, index=False)
     return
 
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__':    
+    parser = argparser()
+    args = parser.parse_args()
+    main(args)

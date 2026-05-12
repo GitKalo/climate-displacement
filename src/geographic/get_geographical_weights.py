@@ -3,24 +3,43 @@ import graph_tool as gt
 import geopandas as gpd
 import pandas as pd
 
+import argparse
 import tqdm
+import sys
 import os
 
 
 
-def main():
+def argparser():
+    parser = argparse.ArgumentParser(
+                    prog=sys.argv[0],
+                    description='What the program does',
+                    epilog='Text at the bottom of help'
+    )
+
+    parser.add_argument('--network_type', type=str, choices=('walking', 'cycling', 'driving', 'driving+service', 'all'), default='all')
+    return parser
+
+
+
+def main(args):
+    network_type = args.network_type
+    
     to_crs = 'epsg:20539'
+    date = '251124'
 
     loaddir = '/data/big/fmalveiro/complexity72/'
     savedir = './data/'
     
-    adjlist_file = 'geographical_neighbours.csv'
+    adjlist_file = f"geographical_neighbours-{network_type}.csv"
 
     adm_level = 2
     adm_file = f"gadm41_SOM_{adm_level}.json.zip"
-    nodes_file = 'road_network_elements.zip!somalia-250905-nodes.geojson'
+    nodes_file = f"road_network_elements-{network_type}.zip!somalia-{date}-nodes.geojson"
 
-    graph_file = 'somalia-road_network_graph.gt.gz'
+    graph_file = f"somalia-road_network_graph-{network_type}.gt.gz"
+
+    neighbours_file = f"geographical_neighbours-{network_type}.csv"
     
     print('Loading adj list...')
     adjlist = pd.read_csv(os.path.join(savedir, adjlist_file), index_col=False)
@@ -90,10 +109,12 @@ def main():
     adjlist['road_distance'] = adjlist.apply(lambda x: x['src_distance'] + x['in_distance'] + x['tgt_distance'], axis=1)
 
     print('Saving to file...')
-    adjlist.to_csv(os.path.join(savedir, 'geographical_neighbours.csv'), index=False)
+    adjlist.to_csv(os.path.join(savedir, neighbours_file), index=False)
     return
 
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == '__main__':    
+    parser = argparser()
+    args = parser.parse_args()
+    main(args)

@@ -7,6 +7,27 @@ import zipfile
 import os
 
 
+def fill_information(nodes_gdf, edges_gdf):
+    """
+    New edge segments do not contain crucial attributes, e.g., length
+    New nodes have an artificial nodeID, not an osmid:
+    - new nodes may have been created, which do not exist in OSM data
+    """
+
+    # edge length most likely will have to be updated with 
+    # simplified['edges'].to_crs('epsg:20539')['geometry'].length
+
+    # the new attribute 'mm_len' should correspond to the updated length
+
+    # the new edge dataframe contains attributes 
+    # 'node_start', 'node_end', 'mm_len',
+    # which should serve the same purpose as 's', 't', 'length'
+    # in the original edge dataframe
+    # names of the new dataframe should be adapted so that
+    # the graph can be successfully built afterwards
+    input('break')
+    return
+
 
 def main():
     date = '251124'
@@ -66,6 +87,8 @@ def main():
     
     del final_nodes
     del final_edges
+
+    final_nodes, final_edges = fill_information(final_nodes, final_edges)
 
     with tempfile.TemporaryDirectory() as tmpdir:
 

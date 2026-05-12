@@ -13,12 +13,30 @@ import itertools
 import tempfile
 import zipfile
 
+import argparse
 import tqdm
+import sys
 import os
 
 
 
+def argparser():
+    parser = argparse.ArgumentParser(
+                    prog=sys.argv[0],
+                    description='What the program does',
+                    epilog='Text at the bottom of help'
+    )
+
+    parser.add_argument('--network_type', type=str, choices=('walking', 'cycling', 'driving', 'driving+service', 'all'), default='all')
+    return parser
+
+
+
 def get_graph(nodes_gdf, edges_gdf, node_vars, edge_vars, graph_attrs=None):
+    """
+    TODO
+    Function may have to be readjusted to use simplfied nodes and edges
+    """
 
     dtype_mapping = {
         'int64': 'int',
@@ -208,14 +226,18 @@ def save_graph(graph, savedir, savefile):
 
 
 
-def main():
-    date = '250905'
+def main(args):
+    network_type = args.network_type
+    date = '251124'
 
     savedir = '/data/big/fmalveiro/complexity72/'
-    elements_zip = 'DEFAULT-road_network_elements.zip'
+    elements_zip = f"DEFAULT-road_network_elements-{network_type}.zip"
+
+    graph_savefile = f"somalia-road_network_graph-{network_type}.gt.gz"
 
     crs = 'epsg:20539'
     tweak_graph = 'lcc'
+
 
     loadpath = os.path.join('/data/big/fmalveiro/complexity72', elements_zip)
 
@@ -250,7 +272,7 @@ def main():
     print(f"Finally, there are {nodes_gdf.shape[0]} nodes and {edges_gdf.shape[0]} edges left.")
 
     print('Saving the graph...')
-    save_graph(graph, savedir, 'somalia-road_network_graph.gt.gz')
+    save_graph(graph, savedir, graph_savefile)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         for element, gdf in zip(('nodes', 'edges'), (nodes_gdf, edges_gdf)):
@@ -273,5 +295,8 @@ def main():
 
 
 
-if __name__ == '__main__':
-    main()
+
+if __name__ == '__main__':    
+    parser = argparser()
+    args = parser.parse_args()
+    main(args)
